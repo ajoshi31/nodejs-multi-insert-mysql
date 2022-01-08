@@ -1,4 +1,3 @@
-import { Request, Response } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getProductById, insertProduct } from '../repo';
@@ -8,19 +7,26 @@ import Papa from 'papaparse';
 
 let processedNum = 0;
 
-const insertBig = async (req: Request, res: Response) => {
-  try {
-    const filePath = path.normalize(`${__dirname}./../assets/test.csv`);
-    importCSV(filePath).catch((error) => {
-      return res.status(500).send('Some error here in isert biG 123');
-    });
-    return res.status(200).json({ data: 'Data send for processing 123' });
-  } catch (error) {
-    return res.status(500).send('Some error here in isert biG 123');
-  }
-};
+process.on('message', async function (message: any) {
+  console.log('[child] received message from server:', message);
+  JSON.stringify(process.argv);
+  const filePath = path.normalize(
+    `${__dirname}./../output/output.csv.${message}`
+  );
 
-async function importCSV(filePath: fs.PathLike) {
+  let time = await importCSV(filePath, message);
+  if (process.send) {
+    process.send({
+      child: process.pid,
+      result: message + 1,
+      time: time
+    });
+  }
+
+  process.disconnect();
+});
+
+async function importCSV(filePath: fs.PathLike, message: any) {
   let parsedNum = 0;
   const dataStream = fs.createReadStream(filePath);
   const parseStream = Papa.parse(Papa.NODE_STREAM_INPUT, {
@@ -31,16 +37,20 @@ async function importCSV(filePath: fs.PathLike) {
   let totalTime = 0;
   const startTime = performance.now();
   for await (const row of parseStream) {
-    //console.log('PA#', parsedNum, ': parsed');
+    // console.log('Child Server # :', message, 'PA#', parsedNum, ': parsed');
     buffer.push(row);
     parsedNum++;
     if (parsedNum % 400 == 0) {
-      await dataForProcessing(buffer);
+      await dataForProcessing(buffer, message);
       buffer = [];
     }
   }
+
   totalTime = totalTime + (performance.now() - startTime);
-  console.log(`Parsed ${parsedNum} rows and took ${totalTime} seconds`);
+  //   console.log(
+  //     `Child Server ${message} : Parsed ${parsedNum} rows and took ${totalTime} seconds`
+  //   );
+  return totalTime;
 }
 
 const wrapTask = async (promise: any) => {
@@ -60,11 +70,11 @@ const handle = async (promise: Promise<any>) => {
   }
 };
 
-const dataForProcessing = async (arrayItems: any) => {
+const dataForProcessing = async (arrayItems: any, message: any) => {
   const tasks = arrayItems.map(task);
   const startTime = performance.now();
-  console.log(`Tasks starting...`);
-  console.log('DW#', processedNum, ': dirty work START');
+  console.log(`Tasks starting... from server ${message}`);
+  console.log('CS#: ', message, 'DW#:', processedNum, ': dirty work START');
   try {
     await Promise.all(tasks.map(wrapTask));
 
@@ -101,5 +111,3 @@ const task = async (item: any) => {
   }
   return `Done for ${insertId}`;
 };
-
-export { insertBig };
